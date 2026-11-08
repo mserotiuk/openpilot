@@ -559,7 +559,7 @@ class CAR(Platforms):
   KIA_CEED = HyundaiPlatformConfig(
     [HyundaiCarDocs("Kia Ceed 2019-21", car_parts=CarParts.common([CarHarness.hyundai_e]))],
     CarSpecs(wheelbase=2.65, steerRatio=13.75, tireStiffnessFactor=0.5),
-    flags=HyundaiFlags.LEGACY,
+    # LEGACY removed: tested on a ProCeed GT 2021 with standard hyundai safety and openpilot longitudinal
   )
   KIA_CEED_PHEV = HyundaiPlatformConfig(
     [HyundaiCarDocs("Kia Ceed Plug-in Hybrid 2021", car_parts=CarParts.common([CarHarness.hyundai_b]))],
