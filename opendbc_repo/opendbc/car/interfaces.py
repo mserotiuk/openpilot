@@ -24,7 +24,7 @@ GearShifter = structs.CarState.GearShifter
 ButtonType = structs.CarState.ButtonEvent.Type
 
 V_CRUISE_MAX = 180
-MAX_CTRL_SPEED = (V_CRUISE_MAX + 4) * CV.KPH_TO_MS
+MAX_CTRL_SPEED = 200 * CV.KPH_TO_MS  # speedTooHigh disengage; max set speed stays V_CRUISE_MAX
 ACCEL_MAX = 2.0
 ACCEL_MIN = -3.5
 
