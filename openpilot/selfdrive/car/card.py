@@ -214,7 +214,7 @@ class Car:
       self.v_cruise_helper.initialize_v_cruise(self.CS_prev, self.initial_cruise_speed)
 
     # TODO: mirror the carState.cruiseState struct?
-    CS.vCruise = float(self.v_cruise_helper.v_cruise_kph)
+    CS.vCruise = float(self.v_cruise_helper.v_cruise_planner_kph)  # true speed; differs from vCruiseCluster on dash-scale cars
     CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_cluster_kph)
 
     return CS, CS_SP, RD

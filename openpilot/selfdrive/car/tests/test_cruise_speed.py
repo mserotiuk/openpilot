@@ -148,3 +148,50 @@ class TestVCruiseHelper(OpenpilotTestCase):
       self.enable(float(v_ego))
       assert V_CRUISE_INITIAL <= self.v_cruise_helper.v_cruise_kph <= V_CRUISE_MAX
       assert self.v_cruise_helper.v_cruise_initialized
+
+
+class TestVCruiseHelperDashScale:
+  """KIA_CEED with openpilot long: set speed on the dash (speedometer) scale, planner gets true speed."""
+
+  @staticmethod
+  def helper(fingerprint, pcm_cruise=False):
+    return VCruiseHelper(car.CarParams(carFingerprint=fingerprint, pcmCruise=pcm_cruise), custom.CarParamsSP(pcmCruiseSpeed=True))
+
+  def test_engage_at_dash_120(self):
+    h = self.helper("KIA_CEED")
+    assert h.v_cruise_planner_kph == 255  # UNSET passes through
+    h.initialize_v_cruise(car.CarState(vEgo=float(114.3 * CV.KPH_TO_MS), vEgoCluster=float(120 * CV.KPH_TO_MS)), V_CRUISE_INITIAL)
+    assert h.v_cruise_kph == 120
+    assert h.v_cruise_cluster_kph == 120
+    assert abs(h.v_cruise_planner_kph - (120 - 3.68) / 1.0216) < 1e-6  # ~113.86 km/h true speed
+    assert abs(h.v_cruise_planner_kph - 114.3) < 0.5
+
+  def test_missing_cluster_speed_falls_back_to_v_ego(self):
+    h = self.helper("KIA_CEED")
+    h.initialize_v_cruise(car.CarState(vEgo=float(100 * CV.KPH_TO_MS)), V_CRUISE_INITIAL)
+    assert h.v_cruise_kph == 100
+
+  def test_other_car_and_stock_long_unchanged(self):
+    for h in (self.helper("HYUNDAI_SONATA"), self.helper("KIA_CEED", pcm_cruise=True)):
+      assert not h.dash_scale
+      h.CP = car.CarParams(carFingerprint=h.CP.carFingerprint, pcmCruise=False)  # let initialize_v_cruise run
+      h.initialize_v_cruise(car.CarState(vEgo=float(114.3 * CV.KPH_TO_MS), vEgoCluster=float(120 * CV.KPH_TO_MS)), V_CRUISE_INITIAL)
+      assert h.v_cruise_kph == 114
+      assert h.v_cruise_planner_kph == h.v_cruise_kph == h.v_cruise_cluster_kph
+
+  def test_gas_override_set_clips_to_dash_speed(self):
+    h = self.helper("KIA_CEED")
+    h.initialize_v_cruise(car.CarState(vEgo=float(80 * CV.KPH_TO_MS), vEgoCluster=float(85 * CV.KPH_TO_MS)), V_CRUISE_INITIAL)
+    h.update_v_cruise(car.CarState(cruiseState={"available": True}), enabled=True, is_metric=True)  # rising-edge enable frame
+    for pressed in (True, False):
+      CS = car.CarState(vEgo=float(114.3 * CV.KPH_TO_MS), vEgoCluster=float(120 * CV.KPH_TO_MS), gasPressed=True, cruiseState={"available": True})
+      CS.buttonEvents = [ButtonEvent(type=ButtonType.decelCruise, pressed=pressed)]
+      h.update_v_cruise(CS, enabled=True, is_metric=True)
+    assert h.v_cruise_kph == 120
+    assert h.v_cruise_cluster_kph == 120
+
+  def test_sentinels_pass_through(self):
+    from openpilot.selfdrive.car.cruise import dash_to_planner_kph, V_CRUISE_UNSET
+    for v in (V_CRUISE_UNSET, -1, 0):
+      assert dash_to_planner_kph(v) == v
+    assert dash_to_planner_kph(V_CRUISE_MAX) < V_CRUISE_MAX  # dash 180 -> ~172.6 true

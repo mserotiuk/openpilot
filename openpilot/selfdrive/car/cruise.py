@@ -27,6 +27,21 @@ CRUISE_INTERVAL_SIGN = {
   ButtonType.decelCruise: -1,
 }
 
+# Kia ProCeed GT (KIA_CEED) with openpilot longitudinal: the set speed lives on the dash (speedometer) scale,
+# so SET at a dash 120 shows 120 on the comma UI and the cluster (SCC11 VSetDis) and holds a dash 120.
+# Speedometer vs vEgo fit: dash_kph = DASH_KPH_SCALE * vEgo_kph + DASH_KPH_OFFSET (6,652 steady samples,
+# residual std 0.38 km/h), measured 2026-11 on route 00000152. Recalibrate after a tyre change.
+DASH_SCALE_SET_SPEED_CARS = ("KIA_CEED",)
+DASH_KPH_SCALE = 1.0216
+DASH_KPH_OFFSET = 3.68
+
+
+def dash_to_planner_kph(v_cruise_kph: float) -> float:
+  # sentinels (V_CRUISE_UNSET 255, -1, 0) pass through unchanged
+  if not 0 < v_cruise_kph < V_CRUISE_UNSET:
+    return v_cruise_kph
+  return (v_cruise_kph - DASH_KPH_OFFSET) / DASH_KPH_SCALE
+
 
 class VCruiseHelper(VCruiseHelperSP):
   def __init__(self, CP, CP_SP):
@@ -37,10 +52,22 @@ class VCruiseHelper(VCruiseHelperSP):
     self.v_cruise_kph_last = 0
     self.button_timers = {ButtonType.decelCruise: 0, ButtonType.accelCruise: 0}
     self.button_change_states = {btn: {"standstill": False, "enabled": False} for btn in self.button_timers}
+    self.dash_scale = CP.carFingerprint in DASH_SCALE_SET_SPEED_CARS and not CP.pcmCruise
 
   @property
   def v_cruise_initialized(self):
     return self.v_cruise_kph != V_CRUISE_UNSET
+
+  @property
+  def v_cruise_planner_kph(self) -> float:
+    # v_cruise_kph is on the dash scale for dash_scale cars; the planner (carState.vCruise) needs true speed
+    return dash_to_planner_kph(self.v_cruise_kph) if self.dash_scale else self.v_cruise_kph
+
+  def _v_ego_set_kph(self, CS) -> float:
+    # speed that SET captures: the dash speed for dash_scale cars, vEgo otherwise or when vEgoCluster is missing
+    if self.dash_scale and CS.vEgoCluster > 0:
+      return CS.vEgoCluster * CV.MS_TO_KPH
+    return CS.vEgo * CV.MS_TO_KPH
 
   def update_v_cruise(self, CS, enabled, is_metric):
     self.v_cruise_kph_last = self.v_cruise_kph
@@ -119,9 +146,9 @@ class VCruiseHelper(VCruiseHelperSP):
     else:
       self.v_cruise_kph += v_cruise_delta * CRUISE_INTERVAL_SIGN[button_type]
 
-    # If set is pressed while overriding, clip cruise speed to minimum of vEgo
+    # If set is pressed while overriding, clip cruise speed to minimum of vEgo (dash speed for dash_scale cars)
     if CS.gasPressed and button_type in (ButtonType.decelCruise, ButtonType.setCruise):
-      self.v_cruise_kph = max(self.v_cruise_kph, CS.vEgo * CV.MS_TO_KPH)
+      self.v_cruise_kph = max(self.v_cruise_kph, self._v_ego_set_kph(CS))
 
     self.v_cruise_kph = np.clip(round(self.v_cruise_kph, 1), self.v_cruise_min, V_CRUISE_MAX)
 
@@ -145,6 +172,6 @@ class VCruiseHelper(VCruiseHelperSP):
     if any(b.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for b in CS.buttonEvents) and self.v_cruise_initialized:
       self.v_cruise_kph = self.v_cruise_kph_last
     else:
-      self.v_cruise_kph = int(round(np.clip(max(CS.vEgo * CV.MS_TO_KPH, initial_speed), V_CRUISE_INITIAL, V_CRUISE_MAX)))
+      self.v_cruise_kph = int(round(np.clip(max(self._v_ego_set_kph(CS), initial_speed), V_CRUISE_INITIAL, V_CRUISE_MAX)))
 
     self.v_cruise_cluster_kph = self.v_cruise_kph
